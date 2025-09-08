@@ -2,31 +2,27 @@ import requests
 from config import TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 from utils.logger import log
 
-API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+class TelegramBot:
+    def __init__(self, token: str = TELEGRAM_TOKEN, chat_id: str = TELEGRAM_CHAT_ID):
+        self.api_url = f"https://api.telegram.org/bot{token}"
+        self.chat_id = chat_id
 
+    def send_message(self, text: str, buttons: list[list[dict]] | None = None):
+        payload = {
+            "chat_id": self.chat_id,
+            "text": text,
+            "parse_mode": "HTML"
+        }
+        if buttons:
+            payload["reply_markup"] = {"inline_keyboard": buttons}
 
-def send_message(text: str, buttons: list[list[dict]] | None = None):
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
+        r = requests.post(f"{self.api_url}/sendMessage", json=payload, timeout=5)
+        data = r.json()
+        if not data.get("ok"):
+            log.error(f"[Telegram] Error: {data}")
+        return data.get("result", {})
 
-    if buttons:
-        payload["reply_markup"] = {"inline_keyboard": buttons}
-
-    log.debug(f"[Telegram] Sending payload: {payload}")
-
-    r = requests.post(f"{API_URL}/sendMessage", json=payload)
-    data = r.json()
-    log.debug(f"[Telegram] Response: {data}")
-
-    return data.get("result", {})
-
-
-def delete_message(message_id: int):
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "message_id": message_id}
-    r = requests.post(f"{API_URL}/deleteMessage", json=payload)
-    data = r.json()
-    log.debug(f"[Telegram] Delete response: {data}")
-    return data
+    def delete_message(self, message_id: int):
+        payload = {"chat_id": self.chat_id, "message_id": message_id}
+        r = requests.post(f"{self.api_url}/deleteMessage", json=payload, timeout=5)
+        return r.json()

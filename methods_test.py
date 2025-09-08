@@ -1,8 +1,19 @@
 import requests
-import json
 
-url = "https://api2.bybit.com/fiat/otc/config/getTokenList"
-resp = requests.get(url)
-data = resp.json()
+BINANCE_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
 
-print(json.dumps(data, indent=2, ensure_ascii=False))
+def check_currency(fiat="EUR", asset="USDT"):
+    payload = {
+        "page": 1,
+        "rows": 1,
+        "payTypes": [],
+        "asset": asset,
+        "tradeType": "BUY",
+        "fiat": fiat
+    }
+    resp = requests.post(BINANCE_URL, json=payload).json()
+    data = resp.get("data", [])
+    print(f"{fiat}: {'✅ дані є' if data else '❌ немає даних'}")
+
+for fiat in ["EUR", "USD", "UAH", "PLN", "GBP", "NGN", "BRL", "INR", "RUB", "CNY", "KRW"]:
+    check_currency(fiat)

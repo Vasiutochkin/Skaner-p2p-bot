@@ -1,5 +1,4 @@
 import requests
-from config import ALLOWED_PAYMENTS
 
 BINANCE_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
 
@@ -10,7 +9,7 @@ session.headers.update({"Content-Type": "application/json"})
 def fetch_binance(trade_type="BUY", fiat="EUR", asset="USDT", limit=3):
     payload = {
         "page": 1,
-        "rows": limit * 5,
+        "rows": limit * 5,  # беремо трохи більше, щоб було з чого вибрати
         "payTypes": [],
         "asset": asset,
         "tradeType": trade_type,
@@ -32,6 +31,7 @@ def fetch_binance(trade_type="BUY", fiat="EUR", asset="USDT", limit=3):
                 continue
 
             adv_no = adv.get("advNo")
+            adv_id = adv.get("advNo")  # Binance іноді використовує advNo як ID
             price = adv.get("price")
             min_amount = adv.get("minSingleTransAmount")
             max_amount = adv.get("maxSingleTransAmount")
@@ -46,10 +46,8 @@ def fetch_binance(trade_type="BUY", fiat="EUR", asset="USDT", limit=3):
             except ValueError:
                 continue
 
+            # ✅ беремо всі методи оплати з JSON
             methods = [m.get("identifier") for m in trade_methods if m.get("identifier")]
-
-            if not any(m in ALLOWED_PAYMENTS for m in methods):
-                continue
 
             offers.append(
                 {
@@ -59,10 +57,11 @@ def fetch_binance(trade_type="BUY", fiat="EUR", asset="USDT", limit=3):
                     "currency": fiat,
                     "asset": asset,
                     "advNo": adv_no,
-                    "methods": methods,
+                    "advId": adv_id,
+                    "methods": methods,   # 👈 усі методи
                     "min_amount": min_amount,
                     "max_amount": max_amount,
-                    "seller_name": seller_name,  # 👈 додаємо ім’я продавця
+                    "seller_name": seller_name,
                 }
             )
 

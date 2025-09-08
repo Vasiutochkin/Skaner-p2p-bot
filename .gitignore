@@ -1,0 +1,32 @@
+/.venv/
+/.idea/
+/.env/# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# IDE settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local configs
+.env
+messages_cache.json
+
+# Build / dist
+build/
+dist/
+*.egg-info/

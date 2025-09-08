@@ -1,129 +1,95 @@
 import time
-from bot.telegram_bot import send_message, delete_message
+from bot.telegram_bot import TelegramBot
 from exchanges.binance import fetch_binance
-from utils.helpers import calculate_spread
-from core.message_cache import is_new_offer, clear_cache
-from config import FIAT, ASSET, SPREAD_THRESHOLD, CHECK_INTERVAL
+from utils.helpers import calculate_spread, get_flag, format_spread
+from core.message_cache import is_new_offer, clear_cache, init_cache
+from config import FIATS, ASSET, SPREAD_THRESHOLD, CHECK_INTERVAL
 from utils.logger import log
 
-active_messages = {}  # {key: message_id} де key = advNo:price
+active_messages = {}
 
+def check_binance(bot: TelegramBot):
+    for fiat in FIATS:
+        buy_offers = fetch_binance("BUY", fiat, ASSET, limit=3)
+        sell_offers = fetch_binance("SELL", fiat, ASSET, limit=3)
 
-def format_spread(spread: float) -> str:
-    """Форматує спред з кольоровими емодзі"""
-    if spread >= SPREAD_THRESHOLD * 3:
-        return f"🟢 <b>{spread:.2f}%</b>"
-    elif spread >= SPREAD_THRESHOLD * 2:
-        return f"🟡 <b>{spread:.2f}%</b>"
-    else:
-        return f"🔴 <b>{spread:.2f}%</b>"
+        if not buy_offers or not sell_offers:
+            continue
 
+        for buy in buy_offers:
+            for sell in sell_offers:
+                if sell["price"] <= buy["price"]:
+                    continue
 
-def orders_overlap(buy, sell) -> bool:
-    """Перевіряє чи перетинаються ордери по сумах"""
-    try:
-        buy_min, buy_max = float(buy["min_amount"]), float(buy["max_amount"])
-        sell_min, sell_max = float(sell["min_amount"]), float(sell["max_amount"])
-        return not (sell_min > buy_max or buy_min > sell_max)
-    except (ValueError, TypeError):
-        return False
+                common_methods = set(buy["methods"]) & set(sell["methods"])
+                if not common_methods:
+                    continue
 
+                try:
+                    buy_min, buy_max = float(buy["min_amount"]), float(buy["max_amount"])
+                    sell_min, sell_max = float(sell["min_amount"]), float(sell["max_amount"])
+                    real_min, real_max = max(buy_min, sell_min), min(buy_max, sell_max)
+                    if real_min > real_max:
+                        continue
+                except (ValueError, TypeError):
+                    continue
 
-def check_binance():
-    """Основна перевірка арбітражу на Binance"""
-    buy_offers = fetch_binance("BUY", FIAT, ASSET, limit=3)
-    sell_offers = fetch_binance("SELL", FIAT, ASSET, limit=3)
+                spread = calculate_spread(buy["price"], sell["price"])
+                if spread < SPREAD_THRESHOLD:
+                    continue
 
-    if not buy_offers or not sell_offers:
-        log.warning("Немає даних від Binance")
-        return
+                log.info(f"{fiat}: BUY={buy['price']} SELL={sell['price']} SPREAD={spread:.2f}%")
 
-    for buy in buy_offers:
-        for sell in sell_offers:
-            # Ціна має бути адекватна
-            if sell["price"] <= buy["price"]:
-                continue
+                key_buy = f"{fiat}:{buy['advNo']}:{buy['price']}"
+                key_sell = f"{fiat}:{sell['advNo']}:{sell['price']}"
 
-            # Спільні методи оплати
-            common_methods = set(buy["methods"]) & set(sell["methods"])
-            if not common_methods:
-                continue
-
-            # Перевірка по сумах
-            if not orders_overlap(buy, sell):
-                continue
-
-            # Рахуємо спред
-            spread = calculate_spread(buy["price"], sell["price"])
-            log.info(
-                f"Binance: BUY={buy['price']} SELL={sell['price']} "
-                f"SPREAD={spread:.2f}% METHODS={', '.join(common_methods)}"
-            )
-
-            if spread >= SPREAD_THRESHOLD:
-                key_buy = f"{buy['advNo']}:{buy['price']}"
-                key_sell = f"{sell['advNo']}:{sell['price']}"
-
-                msg = (
-                    f"🔄 <b>Арбітраж знайдено!</b>\n"
-                    f"🔴 Binance | Продавець: <b>{sell['seller_name']}</b>\n"
-                    f"   Ціна: {sell['price']} {sell['currency']}\n"
-                    f"   Мін: {sell['min_amount']} {sell['currency']}, "
-                    f"Макс: {sell['max_amount']} {sell['currency']}\n"
-                    f"──────────\n"
-                    f"🟢 Binance | Продавець: <b>{buy['seller_name']}</b>\n"
-                    f"   Ціна: {buy['price']} {buy['currency']}\n"
-                    f"   Мін: {buy['min_amount']} {buy['currency']}, "
-                    f"Макс: {buy['max_amount']} {buy['currency']}\n"
-                    f"──────────\n"
-                    f"📈 Спред: {format_spread(spread)}\n"
-                    f"💳 Метод: <b>{', '.join(common_methods)}</b>\n"
-                )
-
-                # Кнопки з посиланням на ордери Binance
-                buttons = [[
-                    {
-                        "text": "Відкрити ордер (SELL)",
-                        "url": f"https://p2p.binance.com/advertiserDetail?advertiserNo={sell['advNo']}"
-                    },
-                    {
-                        "text": "Відкрити ордер (BUY)",
-                        "url": f"https://p2p.binance.com/advertiserDetail?advertiserNo={buy['advNo']}"
-                    }
-                ]]
-
-                # Відправляємо тільки якщо це новий оффер
                 if is_new_offer(key_buy) or is_new_offer(key_sell):
-                    log.info("Відправляємо повідомлення в Telegram")
-                    sent = send_message(msg, buttons=buttons)
+                    profit_min = (sell["price"] - buy["price"]) * real_min / buy["price"]
+                    profit_max = (sell["price"] - buy["price"]) * real_max / buy["price"]
+
+                    msg = (
+                        f"🚀 <b>Арбітраж знайдено {get_flag(fiat)} ({fiat})!</b>\n\n"
+                        f"🔴 SELL: {sell['price']} {sell['currency']} | {sell['seller_name']}\n"
+                        f"🟢 BUY: {buy['price']} {buy['currency']} | {buy['seller_name']}\n\n"
+                        f"📈 Спред: {format_spread(spread)}\n"
+                        f"💳 Оплата: {', '.join(common_methods)}\n"
+                        f"💵 Діапазон: {real_min:.2f} – {real_max:.2f} {fiat}\n"
+                        f"💰 Прибуток: {profit_min:.2f} – {profit_max:.2f} {fiat}\n"
+                        f"⏱ {time.strftime('%H:%M')}"
+                    )
+
+                    buttons = [[
+                        {
+                            "text": "SELL",
+                            "url": f"https://p2p.binance.com/trade/sell/{sell['asset']}?fiat={fiat}&tradeType=SELL&advNo={sell['advId']}"
+                        },
+                        {
+                            "text": "BUY",
+                            "url": f"https://p2p.binance.com/trade/buy/{buy['asset']}?fiat={fiat}&tradeType=BUY&advNo={buy['advId']}"
+                        }
+                    ]]
+
+                    sent = bot.send_message(msg, buttons)
                     if sent:
                         active_messages[key_buy] = sent["message_id"]
                         active_messages[key_sell] = sent["message_id"]
 
-    # 🔄 Видаляємо неактуальні повідомлення
-    for key, msg_id in list(active_messages.items()):
-        still_alive = any(
-            f"{o['advNo']}:{o['price']}" == key for o in (buy_offers + sell_offers)
-        )
-        if not still_alive:
-            log.info(f"Ордер {key} більше недоступний → видаляємо повідомлення")
-            delete_message(msg_id)
-            del active_messages[key]
-
-
 def main():
     clear_cache()
-    log.info("=== Skaner P2P Bot (Binance) стартує ===")
+    init_cache()
+    bot = TelegramBot()
+    log.info("=== Skaner P2P Bot стартує ===")
 
-    try:
-        while True:
-            check_binance()
+    while True:
+        try:
+            check_binance(bot)
             time.sleep(CHECK_INTERVAL)
-    except KeyboardInterrupt:
-        log.info("🛑 Бот зупинено користувачем")
-    except Exception as e:
-        log.error(f"Помилка у циклі: {e}")
-
+        except KeyboardInterrupt:
+            log.info("🛑 Бот зупинений користувачем")
+            break
+        except Exception as e:
+            log.error(f"Помилка: {e}")
+            time.sleep(5)
 
 if __name__ == "__main__":
     main()
