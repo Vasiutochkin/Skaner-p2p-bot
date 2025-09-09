@@ -1,19 +1,29 @@
-import requests
+from bot.telegram_bot import TelegramBot
+from core.strategy import find_arbitrage
 
-BINANCE_URL = "https://p2p.binance.com/bapi/c2c/v2/friendly/c2c/adv/search"
-
-def check_currency(fiat="EUR", asset="USDT"):
-    payload = {
-        "page": 1,
-        "rows": 1,
-        "payTypes": [],
-        "asset": asset,
-        "tradeType": "BUY",
-        "fiat": fiat
+def test_full_arbitrage():
+    sell_order = {
+        "price": "42.7",
+        "minSingleTransAmount": "1000",
+        "maxSingleTransAmount": "2000",
+        "payTypes": ["PrivatBank"],
+        "nickName": "User-SELL"
     }
-    resp = requests.post(BINANCE_URL, json=payload).json()
-    data = resp.get("data", [])
-    print(f"{fiat}: {'✅ дані є' if data else '❌ немає даних'}")
+    buy_order = {
+        "price": "41.5",
+        "minSingleTransAmount": "500",
+        "maxSingleTransAmount": "3000",
+        "payTypes": ["PrivatBank"],
+        "nickName": "User-BUY"
+    }
 
-for fiat in ["EUR", "USD", "UAH", "PLN", "GBP", "NGN", "BRL", "INR", "RUB", "CNY", "KRW"]:
-    check_currency(fiat)
+    result = find_arbitrage(sell_order, buy_order, fiat="UAH", asset="USDT")
+    print("Arbitrage result:", result)
+
+    if result:
+        bot = TelegramBot()
+        resp = bot.send_arbitrage(result)
+        print("Telegram response:", resp)
+
+if __name__ == "__main__":
+    test_full_arbitrage()
